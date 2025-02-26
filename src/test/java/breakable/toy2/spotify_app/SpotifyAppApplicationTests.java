@@ -2,6 +2,7 @@ package breakable.toy2.spotify_app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -49,4 +50,28 @@ class SpotifyAppApplicationTests {
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
 	}
 
+	@Test
+	void shouldReturnTopAuthors() {
+		ResponseEntity<Map> response = restTemplate.getForEntity("/me/top/artists", Map.class);
+		assertThat(response.getStatusCode()).isNotNull();
+	}
+
+	@Test
+	void shouldReturnAnArtist() {
+		ResponseEntity<Map> response = restTemplate.getForEntity("/artists/0TnOYISbd1XYRBk9myaseg", Map.class);
+		assertThat(response.getStatusCode()).isNotNull();
+	}
+
+	@Test
+	void shouldReturnAnAlbum() {
+		ResponseEntity<Map> response = restTemplate.getForEntity("/artists/4aawyAB9vmqN3uQ7FjRGTy", Map.class);
+		assertThat(response.getStatusCode()).isNotNull();
+	}
+
+	@Test
+	void shouldSearch() {
+		ResponseEntity<Map> response = restTemplate
+				.getForEntity("/search?query=remaster%20track:Doxy%20artist:Miles%20Davis", Map.class);
+		assertThat(response.getStatusCode()).isNotNull();
+	}
 }
