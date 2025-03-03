@@ -5,9 +5,10 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -17,9 +18,11 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @RestController
@@ -41,6 +44,8 @@ public class Controller {
     private String originState = UUID.randomUUID().toString();
 
     private String sessionCode = "";
+
+    private String refreshToken = "";
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -93,15 +98,40 @@ public class Controller {
 
         ResponseEntity<Map> apiResponse = restTemplate.exchange(url, HttpMethod.POST, request, Map.class);
         sessionCode = (String) apiResponse.getBody().get("access_token");
+        refreshToken = (String) apiResponse.getBody().get("refresh_token");
 
-        responseHeaders.add("Location", "http://localhost:5173/");
+        responseHeaders.add("Location", "http://localhost:5173/dashboard");
         responseBody.put("message", "ok");
         return new ResponseEntity<>(responseBody, responseHeaders, HttpStatus.FOUND);
     }
 
+    @Scheduled(initialDelay = 55, fixedRate = 55, timeUnit = TimeUnit.MINUTES)
+    private void refreshAccessToken() {
+        if (refreshToken == null || refreshToken.isEmpty()) {
+            return;
+        }
+        String url = "https://accounts.spotify.com/api/token";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        headers.setBasicAuth(clientId, clientSecret);
+
+        String body = "grant_type=refresh_token&refresh_token=" + refreshToken;
+        HttpEntity<String> request = new HttpEntity<>(body, headers);
+
+        ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.POST, request, Map.class);
+        sessionCode = (String) response.getBody().get("access_token");
+
+        if (response.getBody().get("refresh_token") != null) {
+            refreshToken = (String) response.getBody().get("refresh_token");
+        }
+    }
+
     @GetMapping("/me/top/artists")
     public Map getUserTopArtist() {
-        String url = UriComponentsBuilder.fromUriString("https://api.spotify.com/v1/me/top/artists").build()
+        String url = UriComponentsBuilder.fromUriString("https://api.spotify.com/v1/me/top/artists")
+                .queryParam("type", "artists")
+                .queryParam("limit", 10)
+                .build()
                 .toString();
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer " + sessionCode);
@@ -118,26 +148,43 @@ public class Controller {
     }
 
     @GetMapping("/artists/{id}")
-    public Map getArtist(@RequestParam String artistId) {
-        String url = UriComponentsBuilder.fromUriString("https://api.spotify.com/v1/artists/" + artistId).build()
+    public Map getArtist(@PathVariable String id) {
+        int limit = 5;
+        String artistEndpoint = "https://api.spotify.com/v1/artists/";
+        String url = UriComponentsBuilder.fromUriString(artistEndpoint + id).build()
                 .toString();
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer " + sessionCode);
         headers.setContentType(MediaType.APPLICATION_JSON);
 
-        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+        ResponseEntity<Map<String, Object>> apiRresponse = restTemplate.exchange(
                 url,
                 HttpMethod.GET,
                 new HttpEntity<>(headers),
                 new ParameterizedTypeReference<Map<String, Object>>() {
                 });
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("artistDetails", apiRresponse.getBody());
 
-        return response.getBody();
+        url = UriComponentsBuilder.fromUriString(artistEndpoint + id + "/top-tracks").build().toString();
+        apiRresponse = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers),
+                new ParameterizedTypeReference<Map<String, Object>>() {
+                });
+        response.put("artistTopTracks", apiRresponse.getBody());
+
+        url = UriComponentsBuilder.fromUriString(artistEndpoint + id + "/albums").queryParam("limit", limit).build()
+                .toString();
+        apiRresponse = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers),
+                new ParameterizedTypeReference<Map<String, Object>>() {
+                });
+        response.put("artistAlbums", apiRresponse.getBody());
+
+        return response;
     }
 
     @GetMapping("/albums/{id}")
-    public Map getAlbum(@RequestParam String albumId) {
-        String url = UriComponentsBuilder.fromUriString("https://api.spotify.com/v1/albums/" + albumId).build()
+    public Map getAlbum(@PathVariable String id) {
+        String url = UriComponentsBuilder.fromUriString("https://api.spotify.com/v1/albums/" + id).build()
                 .toString();
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer " + sessionCode);
@@ -157,6 +204,8 @@ public class Controller {
     public Map search(@RequestParam String query) {
         String url = UriComponentsBuilder.fromUriString("https://api.spotify.com/v1/search")
                 .queryParam("q", query)
+                .queryParam("type", "album,artist,track,playlist")
+                .queryParam("limit", 5)
                 .build()
                 .toString();
         HttpHeaders headers = new HttpHeaders();
